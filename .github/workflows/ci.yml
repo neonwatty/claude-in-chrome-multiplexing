@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shellcheck hook scripts
+        run: shellcheck .claude/hooks/*.sh
+
+      - name: Validate settings JSON
+        run: jq empty .claude/settings.json
+
+  test:
+    name: Hook unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make hooks executable
+        run: chmod +x .claude/hooks/*.sh
+
+      - name: Test enforce-tab-id denies when no tab pinned
+        run: |
+          RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__ui_tap","tool_input":{"x":10,"y":20},"session_id":"test-no-tab","hook_event_name":"PreToolUse"}' \
+            | .claude/hooks/enforce-tab-id.sh)
+          echo "$RESULT"
+          echo "$RESULT" | jq -e '.hookSpecificOutput.permissionDecision == "deny"'
+
+      - name: Test enforce-tab-id allows bootstrap tools
+        run: |
+          RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"session_id":"test-bootstrap","hook_event_name":"PreToolUse"}' \
+            | .claude/hooks/enforce-tab-id.sh)
+          echo "$RESULT"
+          echo "$RESULT" | jq -e '.hookSpecificOutput.permissionDecision == "allow"'
+
+      - name: Test capture-tab-id stores tab ID
+        run: |
+          echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"tool_response":"{\"tabId\":42}","session_id":"test-capture","hook_event_name":"PostToolUse"}' \
+            | .claude/hooks/capture-tab-id.sh
+          STORED=$(cat "$HOME/.claude/chrome-sessions/test-capture")
+          [ "$STORED" = "42" ] && echo "PASS: tab ID 42 stored" || (echo "FAIL: got '$STORED'" && exit 1)
+
+      - name: Test enforce-tab-id injects stored tab ID
+        run: |
+          mkdir -p "$HOME/.claude/chrome-sessions"
+          echo "42" > "$HOME/.claude/chrome-sessions/test-inject"
+          RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__ui_tap","tool_input":{"x":10,"y":20},"session_id":"test-inject","hook_event_name":"PreToolUse"}' \
+            | .claude/hooks/enforce-tab-id.sh)
+          echo "$RESULT"
+          echo "$RESULT" | jq -e '.hookSpecificOutput.updatedInput.tabId == 42'
+          echo "$RESULT" | jq -e '.hookSpecificOutput.updatedInput.x == 10'
+
+      - name: Test capture-tab-id does not overwrite existing
+        run: |
+          mkdir -p "$HOME/.claude/chrome-sessions"
+          echo "42" > "$HOME/.claude/chrome-sessions/test-no-overwrite"
+          echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"tool_response":"{\"tabId\":99}","session_id":"test-no-overwrite","hook_event_name":"PostToolUse"}' \
+            | .claude/hooks/capture-tab-id.sh
+          STORED=$(cat "$HOME/.claude/chrome-sessions/test-no-overwrite")
+          [ "$STORED" = "42" ] && echo "PASS: original tab preserved" || (echo "FAIL: got '$STORED'" && exit 1)
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf "$HOME/.claude/chrome-sessions"
