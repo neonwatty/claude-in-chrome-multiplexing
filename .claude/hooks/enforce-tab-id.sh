@@ -6,12 +6,15 @@
 # • All other claude-in-chrome tools are DENIED until a tab has been captured,
 #   and once a tab exists, the stored tabId is merged into tool_input so every
 #   call is automatically pinned to the session's dedicated tab.
+#
+# Uses CHROME_SESSION_KEY (set by session-start.sh) as the primary lookup key,
+# falling back to session_id from the hook input.
 set -euo pipefail
 
 INPUT=$(cat)
 
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
+INPUT_SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 
 # ── Bootstrap tools: allow through without tab pinning ──────────────
 case "$TOOL_NAME" in
@@ -28,7 +31,15 @@ esac
 
 # ── All other chrome tools: enforce tab pinning ─────────────────────
 STATE_DIR="$HOME/.claude/chrome-sessions"
-STATE_FILE="$STATE_DIR/$SESSION_ID"
+
+# Try the canonical key first, then fall back to input session_id
+SESSION_KEY="${CHROME_SESSION_KEY:-$INPUT_SESSION_ID}"
+STATE_FILE="$STATE_DIR/$SESSION_KEY"
+
+# Fallback: if the canonical key file doesn't exist, try input session_id
+if { [ ! -f "$STATE_FILE" ] || [ ! -s "$STATE_FILE" ]; } && [ "$INPUT_SESSION_ID" != "$SESSION_KEY" ]; then
+  STATE_FILE="$STATE_DIR/$INPUT_SESSION_ID"
+fi
 
 if [ ! -f "$STATE_FILE" ] || [ ! -s "$STATE_FILE" ]; then
   jq -n '{
