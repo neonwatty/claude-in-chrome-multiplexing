@@ -61,6 +61,50 @@ into existing `hooks` object if you already have one):
 Optionally copy `.claude/CLAUDE.md` for a soft reinforcement layer that reminds
 Claude of the rules in-context.
 
+## Install globally
+
+To enable tab isolation for every Claude Code session regardless of project:
+
+```bash
+mkdir -p ~/.claude/hooks
+curl -fsSL https://raw.githubusercontent.com/neonwatty/claude-in-chrome-multiplexing/main/.claude/hooks/{session-start,capture-tab-id,enforce-tab-id}.sh \
+  -o ~/.claude/hooks/session-start.sh \
+  -o ~/.claude/hooks/capture-tab-id.sh \
+  -o ~/.claude/hooks/enforce-tab-id.sh
+chmod +x ~/.claude/hooks/*.sh
+```
+
+Then add the hook entries to `~/.claude/settings.json` using absolute paths:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/session-start.sh" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__claude-in-chrome__tabs_create_mcp",
+        "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/capture-tab-id.sh" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__claude-in-chrome__.*",
+        "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/enforce-tab-id.sh" }]
+      }
+    ]
+  }
+}
+```
+
+The browser-specific hooks (`PreToolUse`, `PostToolUse`) only fire when
+Claude-in-Chrome tools are used, so there's no overhead in projects that don't
+use the browser.
+
 ## How it works
 
 | Hook | Event | Purpose |
