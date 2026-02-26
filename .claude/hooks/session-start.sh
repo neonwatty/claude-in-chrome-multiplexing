@@ -7,7 +7,6 @@ set -euo pipefail
 
 INPUT=$(cat)
 
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 
 STATE_DIR="$HOME/.claude/chrome-sessions"

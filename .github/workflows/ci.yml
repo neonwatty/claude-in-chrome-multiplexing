@@ -63,10 +63,11 @@ jobs:
 
       - name: "enforce: falls back to input session_id when env var missing"
         run: |
+          unset CHROME_SESSION_KEY
           mkdir -p "$HOME/.claude/chrome-sessions"
           echo "55" > "$HOME/.claude/chrome-sessions/test-fallback"
           RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__navigate","tool_input":{"url":"https://example.com"},"session_id":"test-fallback","hook_event_name":"PreToolUse"}' \
-            | unset CHROME_SESSION_KEY && .claude/hooks/enforce-tab-id.sh)
+            | .claude/hooks/enforce-tab-id.sh)
           echo "$RESULT"
           echo "$RESULT" | jq -e '.hookSpecificOutput.updatedInput.tabId == 55'
 
