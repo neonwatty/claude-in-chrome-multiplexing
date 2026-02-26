@@ -104,6 +104,11 @@ Per-session tab IDs are stored as plain-text files:
 
 ## Known limitations
 
+- **Separate sessions only**: Isolation works across separate Claude Code
+  sessions (different terminal windows). Task agents and agent teams within a
+  single session share the parent's session key and therefore share a tab.
+  `$CLAUDE_ENV_FILE` writes from `SubagentStart` hooks do not propagate to
+  subsequent hooks, so per-subagent isolation is not currently achievable.
 - **Tab closure mid-session**: If the pinned tab is closed in Chrome, calls will
   fail with a stale tab ID. Restart the Claude Code session to recover.
 - **Response format variance**: The `tabs_create_mcp` response format isn't

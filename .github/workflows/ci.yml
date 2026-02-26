@@ -34,45 +34,87 @@ jobs:
       - name: Make hooks executable
         run: chmod +x .claude/hooks/*.sh
 
-      - name: Test enforce-tab-id denies when no tab pinned
+      # ── enforce-tab-id tests ──────────────────────────────────────
+      - name: "enforce: denies when no tab pinned"
         run: |
           RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__ui_tap","tool_input":{"x":10,"y":20},"session_id":"test-no-tab","hook_event_name":"PreToolUse"}' \
             | .claude/hooks/enforce-tab-id.sh)
           echo "$RESULT"
           echo "$RESULT" | jq -e '.hookSpecificOutput.permissionDecision == "deny"'
 
-      - name: Test enforce-tab-id allows bootstrap tools
+      - name: "enforce: allows bootstrap tools"
         run: |
           RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"session_id":"test-bootstrap","hook_event_name":"PreToolUse"}' \
             | .claude/hooks/enforce-tab-id.sh)
           echo "$RESULT"
           echo "$RESULT" | jq -e '.hookSpecificOutput.permissionDecision == "allow"'
 
-      - name: Test capture-tab-id stores tab ID
-        run: |
-          echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"tool_response":"{\"tabId\":42}","session_id":"test-capture","hook_event_name":"PostToolUse"}' \
-            | .claude/hooks/capture-tab-id.sh
-          STORED=$(cat "$HOME/.claude/chrome-sessions/test-capture")
-          [ "$STORED" = "42" ] && echo "PASS: tab ID 42 stored" || (echo "FAIL: got '$STORED'" && exit 1)
-
-      - name: Test enforce-tab-id injects stored tab ID
+      - name: "enforce: injects stored tab ID (via env var key)"
+        env:
+          CHROME_SESSION_KEY: test-env-key
         run: |
           mkdir -p "$HOME/.claude/chrome-sessions"
-          echo "42" > "$HOME/.claude/chrome-sessions/test-inject"
-          RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__ui_tap","tool_input":{"x":10,"y":20},"session_id":"test-inject","hook_event_name":"PreToolUse"}' \
+          echo "42" > "$HOME/.claude/chrome-sessions/test-env-key"
+          RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__ui_tap","tool_input":{"x":10,"y":20},"session_id":"different-id","hook_event_name":"PreToolUse"}' \
             | .claude/hooks/enforce-tab-id.sh)
           echo "$RESULT"
           echo "$RESULT" | jq -e '.hookSpecificOutput.updatedInput.tabId == 42'
           echo "$RESULT" | jq -e '.hookSpecificOutput.updatedInput.x == 10'
 
-      - name: Test capture-tab-id does not overwrite existing
+      - name: "enforce: falls back to input session_id when env var missing"
+        run: |
+          unset CHROME_SESSION_KEY
+          mkdir -p "$HOME/.claude/chrome-sessions"
+          echo "55" > "$HOME/.claude/chrome-sessions/test-fallback"
+          RESULT=$(echo '{"tool_name":"mcp__claude-in-chrome__navigate","tool_input":{"url":"https://example.com"},"session_id":"test-fallback","hook_event_name":"PreToolUse"}' \
+            | .claude/hooks/enforce-tab-id.sh)
+          echo "$RESULT"
+          echo "$RESULT" | jq -e '.hookSpecificOutput.updatedInput.tabId == 55'
+
+      # ── capture-tab-id tests ──────────────────────────────────────
+      - name: "capture: stores tab ID (JSON tabId field)"
+        env:
+          CHROME_SESSION_KEY: test-capture-json
+        run: |
+          echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"tool_response":"{\"tabId\":42}","session_id":"test-capture-input","hook_event_name":"PostToolUse"}' \
+            | .claude/hooks/capture-tab-id.sh
+          # Should write to env-var key
+          STORED=$(cat "$HOME/.claude/chrome-sessions/test-capture-json")
+          [ "$STORED" = "42" ] && echo "PASS: tab ID 42 stored under env key" || (echo "FAIL: got '$STORED'" && exit 1)
+          # Should also write to input session_id key
+          STORED2=$(cat "$HOME/.claude/chrome-sessions/test-capture-input")
+          [ "$STORED2" = "42" ] && echo "PASS: tab ID 42 also stored under input session_id" || (echo "FAIL: got '$STORED2'" && exit 1)
+
+      - name: "capture: parses 'Tab ID: NNN' text format"
+        env:
+          CHROME_SESSION_KEY: test-capture-text
+        run: |
+          echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"tool_response":"Created new tab. Tab ID: 99","session_id":"sid-text","hook_event_name":"PostToolUse"}' \
+            | .claude/hooks/capture-tab-id.sh
+          STORED=$(cat "$HOME/.claude/chrome-sessions/test-capture-text")
+          [ "$STORED" = "99" ] && echo "PASS: tab ID 99 from text" || (echo "FAIL: got '$STORED'" && exit 1)
+
+      - name: "capture: does not overwrite existing"
+        env:
+          CHROME_SESSION_KEY: test-no-overwrite
         run: |
           mkdir -p "$HOME/.claude/chrome-sessions"
           echo "42" > "$HOME/.claude/chrome-sessions/test-no-overwrite"
-          echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"tool_response":"{\"tabId\":99}","session_id":"test-no-overwrite","hook_event_name":"PostToolUse"}' \
+          echo '{"tool_name":"mcp__claude-in-chrome__tabs_create_mcp","tool_input":{},"tool_response":"{\"tabId\":99}","session_id":"sid-nowrite","hook_event_name":"PostToolUse"}' \
             | .claude/hooks/capture-tab-id.sh
           STORED=$(cat "$HOME/.claude/chrome-sessions/test-no-overwrite")
           [ "$STORED" = "42" ] && echo "PASS: original tab preserved" || (echo "FAIL: got '$STORED'" && exit 1)
+
+      # ── session-start tests ───────────────────────────────────────
+      - name: "session-start: writes CHROME_SESSION_KEY to env file"
+        run: |
+          ENV_FILE=$(mktemp)
+          RESULT=$(echo '{"session_id":"test-start","source":"startup","hook_event_name":"SessionStart"}' \
+            | CLAUDE_ENV_FILE="$ENV_FILE" .claude/hooks/session-start.sh)
+          echo "$RESULT"
+          echo "$RESULT" | jq -e '.additionalContext' > /dev/null
+          grep -q 'CHROME_SESSION_KEY=chrome-' "$ENV_FILE" && echo "PASS: env var written" || (echo "FAIL: env file contents: $(cat "$ENV_FILE")" && exit 1)
+          rm -f "$ENV_FILE"
 
       - name: Cleanup
         if: always()

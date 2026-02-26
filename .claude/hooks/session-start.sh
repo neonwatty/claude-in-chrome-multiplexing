@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # session-start.sh — SessionStart hook
-# Creates per-session state directory and injects tab-creation reminder.
+# Creates per-session state directory, generates a stable CHROME_SESSION_KEY
+# (bridging the session-ID mismatch between PreToolUse and PostToolUse hooks),
+# and injects the tab-creation reminder.
 set -euo pipefail
 
 INPUT=$(cat)
 
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
 
 STATE_DIR="$HOME/.claude/chrome-sessions"
@@ -14,13 +15,20 @@ mkdir -p "$STATE_DIR"
 # Prune stale session files (>24 h)
 find "$STATE_DIR" -type f -mtime +1 -delete 2>/dev/null || true
 
-# Fresh session → clear any leftover state for this session ID
 case "$SOURCE" in
   startup|clear)
-    rm -f "$STATE_DIR/$SESSION_ID"
+    # Fresh session → generate a new stable key and clear old state
+    SESSION_KEY="chrome-$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$$-$(date +%s)")"
+    rm -f "$STATE_DIR/$SESSION_KEY"
+
+    # Persist the key so every subsequent hook in this session can read it
+    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+      echo "CHROME_SESSION_KEY=$SESSION_KEY" >> "$CLAUDE_ENV_FILE"
+    fi
     ;;
   resume|compact)
-    # Keep existing state — tab may still be valid
+    # Keep existing state — tab may still be valid.
+    # CHROME_SESSION_KEY is already in the environment from the original start.
     ;;
 esac
 
