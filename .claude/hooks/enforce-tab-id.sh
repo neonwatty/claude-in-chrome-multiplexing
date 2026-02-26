@@ -71,6 +71,13 @@ fi
 TOOL_INPUT=$(echo "$INPUT" | jq '.tool_input // {}')
 UPDATED=$(echo "$TOOL_INPUT" | jq --argjson tabId "$TAB_ID" '. + {"tabId": $tabId}')
 
+# Strip the mcp__claude-in-chrome__ prefix for readability
+SHORT_TOOL="${TOOL_NAME#mcp__claude-in-chrome__}"
+
+# Log every enforced call so operators can watch isolation in real time
+LOG="$STATE_DIR/debug.log"
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] enforce: key=$SESSION_KEY tab=$TAB_ID tool=$SHORT_TOOL" >> "$LOG"
+
 jq -n --argjson updated "$UPDATED" '{
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
