@@ -1,5 +1,7 @@
 # Claude-in-Chrome Tab Isolation
 
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=flat&logo=discord&logoColor=white)](https://discord.gg/7xsxU4ZG6A)
+
 [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) that
 prevent multiple concurrent Claude Code sessions from interfering with each
 other's Chrome tabs when using the
